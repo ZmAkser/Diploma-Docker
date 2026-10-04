@@ -1,0 +1,88 @@
+name: Build & Deploy Docker to Yandex Cloud
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Dockerfile"
+      - "**/*.Dockerfile"
+      - "src/**"
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Yandex Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY }}
+          username: "oauth"
+          password: ${{ env.YC_OAUTH_TOKEN }}
+        env:
+          YC_OAUTH_TOKEN: ${{ steps.get-token.outputs.token }}
+
+      - name: Get IAM OAuth token from YC key
+        id: get-token
+        run: |
+          echo "${{ secrets.YC_SERVICE_ACCOUNT_KEY }}" > sa-key.json
+          export YC_SERVICE_ACCOUNT_KEY_FILE=sa-key.json
+          # Получаем OAuth-токен через yc CLI (нужно установить)
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d @sa-key.json \
+            "https://iam.api.cloud.yandex.net/iam/v1/tokens" \
+            | jq -r '.iamToken' > token.txt
+          cat token.txt
+        shell: bash
+        # Примечание: лучше поставить yc CLI и использовать `yc iam create-token`
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_REGISTRY }}/my-app:latest
+            ${{ secrets.DOCKER_REGISTRY }}/my-app:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-remote:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to remote host
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            REGISTRY="${{ secrets.DOCKER_REGISTRY }}"
+            IMAGE="$REGISTRY/my-app:latest"
+            CONTAINER="${{ secrets.CONTAINER_NAME }}"
+
+            # Логин в реестр на удалённой машине
+            echo "${{ env.REGISTRY_PASSWORD }}" | docker login "$REGISTRY" --username oauth --password-stdin
+
+            # Скачивание нового образа
+            docker pull "$IMAGE"
+
+            # Перезапуск контейнера
+            if docker ps -q -f name="$CONTAINER" > /dev/null; then
+              docker stop "$CONTAINER" || true
+              docker rm "$CONTAINER" || true
+            fi
+            docker run -d \
+              --name "$CONTAINER" \
+              --restart always \
+              "$IMAGE"
