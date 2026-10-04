@@ -56,7 +56,7 @@ jobs:
             docker pull ${{ env.YCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             docker stop ${{ env.IMAGE_NAME }} 2>/dev/null || true
             docker rm   ${{ env.IMAGE_NAME }} 2>/dev/null || true
-            docker run -d \
+            docker run -p 8080:80 -d \
               --name ${{ env.IMAGE_NAME }} \
               --restart unless-stopped \
               ${{ env.YCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
