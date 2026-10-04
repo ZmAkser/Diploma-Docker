@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  YCR_REGISTRY: cr.yandex/crpeif78ogd4s7nin43b
+  YCR_REGISTRY: cr.yandex/crpn809cfrp4igmmgicn
   IMAGE_NAME: app
 
 jobs:
